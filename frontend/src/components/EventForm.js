@@ -1,33 +1,32 @@
+
 import React, { useState } from 'react';
 
 function EventForm() {
   const [eventId, setEventId] = useState('');
   const [eventTime, setEventTime] = useState('');
-  const [arrivalTime, setArrivalTime] = useState('');
   const [value, setValue] = useState('');
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = (e) => {
     e.preventDefault();
-    
-    // Send event to backend API
-    const response = await fetch('/ingest', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        event_id: eventId,
-        event_time: eventTime,
-        arrival_time: arrivalTime,
-        value: value,
-      }),
-    });
 
-    if (response.ok) {
-      console.log('Event ingested successfully');
-    } else {
-      console.error('Failed to ingest event');
-    }
+    const newEvent = {
+      event_id: eventId,
+      event_time: eventTime,
+      arrival_time: new Date().toISOString(),
+      value: parseFloat(value),
+    };
+
+    // Store event in localStorage
+    const events = JSON.parse(localStorage.getItem('events')) || [];
+    localStorage.setItem('events', JSON.stringify([...events, newEvent]));
+
+    // Clear form
+    setEventId('');
+    setEventTime('');
+    setValue('');
+
+    // Dispatch a custom event to notify the SnapshotList component
+    window.dispatchEvent(new Event('storage'));
   };
 
   return (
@@ -50,17 +49,6 @@ function EventForm() {
             type="datetime-local"
             value={eventTime}
             onChange={(e) => setEventTime(e.target.value)}
-            required
-          />
-        </label>
-      </div>
-      <div>
-        <label>
-          Arrival Time:
-          <input
-            type="datetime-local"
-            value={arrivalTime}
-            onChange={(e) => setArrivalTime(e.target.value)}
             required
           />
         </label>

@@ -1,63 +1,102 @@
 import React, { useState, useEffect } from 'react';
+import MetricsChart from './MetricsChart';
 
 function SnapshotList() {
   const [snapshots, setSnapshots] = useState([]);
-  const [dailyData, setDailyData] = useState({});
+
+  const processEventsAndGenerateSnapshots = () => {
+    const events = JSON.parse(localStorage.getItem('events')) || [];
+    const dailyMetrics = {};
+
+    // Sort events by arrival time to process them in order
+    events.sort((a, b) => new Date(a.arrival_time) - new Date(b.arrival_time));
+
+    // Keep track of processed event IDs to handle duplicates
+    const processedEventIds = new Set();
+
+    // Generate a snapshot for each event
+    const newSnapshots = events.map(event => {
+      if (processedEventIds.has(event.event_id)) {
+        // If the event is a duplicate, return null and filter it out later
+        return null;
+      }
+
+      processedEventIds.add(event.event_id);
+
+      const day = new Date(event.event_time).toISOString().split('T')[0];
+      if (!dailyMetrics[day]) {
+        dailyMetrics[day] = { value: 0, count: 0 };
+      }
+      dailyMetrics[day].value += event.value;
+      dailyMetrics[day].count += 1;
+
+      // Create a deep copy of the dailyMetrics to store in the snapshot
+      const snapshotMetrics = JSON.parse(JSON.stringify(dailyMetrics));
+
+      return {
+        timestamp: event.arrival_time,
+        daily_metrics: snapshotMetrics,
+      };
+    }).filter(Boolean); // Filter out nulls from duplicate events
+
+    setSnapshots(newSnapshots.reverse()); // Reverse to show latest snapshots first
+  };
 
   useEffect(() => {
-    // Fetch snapshots from backend API
-    const fetchData = async () => {
-      const snapshotsResponse = await fetch('http://localhost:3001/snapshots');
-      const snapshotsData = await snapshotsResponse.json();
-      setSnapshots(snapshotsData);
-      
-      const dailyResponse = await fetch('http://localhost:5000/daily');
-      const dailyData = await dailyResponse.json();
-      setDailyData(dailyData);
+    // Initial processing of events
+    processEventsAndGenerateSnapshots();
+
+    // Listen for the custom 'storage' event dispatched from EventForm
+    const handleStorageChange = () => {
+      processEventsAndGenerateSnapshots();
     };
 
-    fetchData();
+    window.addEventListener('storage', handleStorageChange);
+
+    // Cleanup the event listener when the component unmounts
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
+
+  // Helper function to get the latest snapshot for each day
+  const getLatestDailySnapshots = () => {
+    const latestSnapshots = {};
+    snapshots.forEach(snapshot => {
+      Object.keys(snapshot.daily_metrics).forEach(day => {
+        if (!latestSnapshots[day]) {
+          latestSnapshots[day] = snapshot;
+        }
+      });
+    });
+    return latestSnapshots;
+  };
+
+  const latestDailySnapshots = getLatestDailySnapshots();
 
   return (
     <div className="dashboard">
-      <h2>Metric Snapshots</h2>
+      <MetricsChart snapshots={snapshots} />
+      <h2>Daily Metric Snapshots</h2>
+      <p>The latest snapshot for each day is provisional. All others are final.</p>
       <div className="snapshot-grid">
-        {snapshots.map((snapshot, index) => (
-          <div key={index} className="snapshot-card">
-            <h3>Snapshot {index + 1}</h3>
-            <p>Timestamp: {snapshot.timestamp}</p>
-            <h4>Daily Metrics:</h4>
-            <ul>
-              {Object.entries(snapshot.daily_metrics || {}).map(([day, metrics]) => (
-                <li key={day}>
-                  <strong>{day}:</strong> Value: {metrics.value}, Count: {metrics.count}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        {Object.entries(latestDailySnapshots).map(([day, snapshot]) => {
+          const metrics = snapshot.daily_metrics[day];
+          const isProvisional = snapshot === snapshots[0]; // The very latest snapshot is provisional
+
+          return (
+            <div key={day} className="snapshot-card">
+              <h3>{day}</h3>
+              <p>Total Value: {metrics.value}</p>
+              <p>Event Count: {metrics.count}</p>
+              <p>Status: <span style={{ color: isProvisional ? '#ffc107' : '#28a745' }}>
+                {isProvisional ? 'Provisional' : 'Final'}
+              </span></p>
+              <p>Last Updated: {new Date(snapshot.timestamp).toLocaleString()}</p>
+            </div>
+          );
+        })}
       </div>
-      
-      <h2>Current Daily Aggregates</h2>
-      <table className="daily-table">
-        <thead>
-          <tr>
-            <th>Day</th>
-            <th>Value</th>
-            <th>Count</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(dailyData).map(([day, metrics]) => (
-            <tr key={day}>
-              <td>{day}</td>
-              <td>{metrics.value}</td>
-              <td>{metrics.count}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
